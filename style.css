@@ -124,7 +124,12 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
               font-size: 9px; font-weight: 700; color: #fff;
               transition: transform .15s ease-out; box-sizing: border-box; }
 .apt-marker:hover { transform: scale(1.2); }
-.apt-marker.multi-source { border-color: #ffd600; border-width: 3px; }
+.badge.deal-good    { background: #e8f5e9; color: #1b5e20; font-weight: 600; }
+.badge.deal-ok      { background: #fff8e1; color: #f57f17; }
+.badge.deal-neutral { background: #f5f5f5; color: #616161; }
+.badge.deal-bad     { background: #ffebee; color: #b71c1c; }
+
+.apt-predicted { font-size: 12px; color: #666; font-style: italic; margin-bottom: 4px; }
 
 /* amenity markers */
 .amenity-marker-wrapper { background: transparent !important; border: none !important; }

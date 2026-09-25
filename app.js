@@ -21,7 +21,21 @@ const AMENITY_COLORS = {
 
 /* DPE energy class colors (French diagnostic) */
 const DPE_COLORS = { A:'#00a651', B:'#51b848', C:'#cdd542', D:'#f6eb15',
-										 E:'#f5c50f', F:'#f0932b', G:'#eb1c24' };
+					 E:'#f5c50f', F:'#f0932b', G:'#eb1c24' };
+/* Map deal_score to a green-yellow-red gradient.
+score < 1 = below market (green), score > 1 = above market (red).
+null = no prediction (grey). */
+function dealColor(score) {
+	if (score == null) return '#9e9e9e';
+	const clamped = Math.max(0.7, Math.min(1.3, score));
+	const t = (clamped - 0.7) / 0.6; // 0..1
+	if (t <= 0.5) {
+		const u = t / 0.5;
+		return `rgb(${Math.round(46 + 210*u)},${Math.round(160 + 33*u)},${Math.round(60 - 50*u)})`;
+	}
+	const u = (t - 0.5) / 0.5;
+	return `rgb(${Math.round(256 - 30*u)},${Math.round(193 - 130*u)},${Math.round(10 + 40*u)})`;
+}
 
 const WD = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const WD_SHORT = { Mon:0, Tue:1, Wed:2, Thu:3, Fri:4, Sat:5, Sun:6 };
@@ -61,7 +75,7 @@ const aptFilter = {
 	priceMin: 0, priceMax: 5000,
 	surfaceMin: 0, roomsMin: 0,
 	energyClass: '',
-	onlyMultiSource: false,
+	onlyGoodDeals: false
 };
 
 /* curated official campus/access maps: [pattern, label, url] */
@@ -426,7 +440,7 @@ function apartmentPassesFilter(l) {
 	if (surface < aptFilter.surfaceMin) return false;
 	if (rooms < aptFilter.roomsMin) return false;
 	if (aptFilter.energyClass && (l.energy_class || '').toUpperCase() !== aptFilter.energyClass) return false;
-	if (aptFilter.onlyMultiSource && !l.sources) return false;
+	if (aptFilter.onlyGoodDeals && (l.deal_score == null || l.deal_score > 0.9)) return false;
 	return true;
 }
 
@@ -454,12 +468,11 @@ function applyApartmentFilters() {
 		const priceLabel = l.price >= 1000
 		? Math.floor(l.price / 100) / 10 + 'k'
 		: String(l.price);
-		const isMulti = !!l.sources;
-		const bgColor = isMulti ? '#c62828' : '#1565c0';
+		const bgColor = dealColor(l.deal_score);
 		const icon = L.divIcon({
 			className: 'apt-marker-wrapper',
-			html: `<div class="apt-marker ${isMulti ? 'multi-source' : ''}"
-									style="background:${bgColor}">${priceLabel}</div>`,
+		html: `<div class="apt-marker"
+						style="background:${bgColor}">${priceLabel}</div>`,
 			iconSize: [34, 22], iconAnchor: [17, 11],
 		});
 		const marker = L.marker([l.lat, l.lon], { icon })
@@ -509,6 +522,17 @@ function apartmentPopup(l) {
 	const blurNote = `<div class="fine" style="margin-top:4px;color:#888;"> Position approximate - source blurs exact location</div>`;
 	const dpeBadge = l.energy_class
 		? `<span class="apt-energy" style="background:${dpeColor}">${esc(l.energy_class.toUpperCase())}</span>` : '';
+	const dealBadge = l.deal_score != null ? (() => {
+		const pct = Math.round((1 - l.deal_score) * 100);
+		if (l.deal_score <= 0.85) return `<span class="badge deal-good">${pct}% below market</span>`;
+		if (l.deal_score <= 0.95) return `<span class="badge deal-ok">near market price</span>`;
+		if (l.deal_score >= 1.15) return `<span class="badge deal-bad">${Math.abs(pct)}% above market</span>`;
+		return `<span class="badge deal-neutral">at market price</span>`;
+	})() : '';
+
+	const predictedLine = l.predicted_price
+		? `<div class="apt-predicted">Estimated market: ${l.predicted_price.toLocaleString('fr-FR')} €/month</div>`
+		: '';
 
 	let sourcesHtml = '';
 	if (l.sources) {
@@ -528,7 +552,8 @@ function apartmentPopup(l) {
 	return `<div class="pop">
 		<h3>${esc(l.title || 'Apartment')}</h3>
 		${l.sources ? '<span class="badge multi">multi-source listing</span>' : ''}
-		<div class="apt-price">${fmtPrice(l.price)} <small>/month</small></div>
+		<div class="apt-price">${fmtPrice(l.price)} <small>/month</small> ${dealBadge}</div>
+		${predictedLine}
 		${photoHtml}
 		<dl class="apt-details">
 			<dt>Surface</dt><dd>${l.surface_m2 ? l.surface_m2 + ' m²' : 'n/a'}</dd>
@@ -610,11 +635,11 @@ function renderAmenityMarkers() {
 let amenityRenderTimer = null;
 let renderTimer = null;
 map.on('moveend zoomend', () => {
-  clearTimeout(renderTimer);
-  renderTimer = setTimeout(() => {
-    if (layers.amenities.visible) renderAmenityMarkers();
-    if (layers.apartments.visible) applyApartmentFilters();
-  }, 150); // 150ms debounce
+	clearTimeout(renderTimer);
+	renderTimer = setTimeout(() => {
+		if (layers.amenities.visible) renderAmenityMarkers();
+		if (layers.apartments.visible) applyApartmentFilters();
+	}, 150); // 150ms debounce
 });
 
 function amenityPopup(a) {
@@ -803,8 +828,9 @@ panel.onAdd = () => {
 					</select>
 				</div>
 				<label class="chk">
-					<input type="checkbox" id="apt-multi"> Only multi-source listings
+					<input type="checkbox" id="apt-deals"> Only good deals (below market)
 				</label>
+				<div class="fine" id="apt-result-line"></div>
 				<div class="fine" id="apt-result-line"></div>
 			</div>
 
@@ -876,8 +902,8 @@ document.getElementById('apt-dpe').addEventListener('change', e => {
 	aptFilter.energyClass = e.target.value;
 	applyApartmentFilters();
 });
-document.getElementById('apt-multi').addEventListener('change', e => {
-	aptFilter.onlyMultiSource = e.target.checked;
+document.getElementById('apt-deals').addEventListener('change', e => {
+	aptFilter.onlyGoodDeals = e.target.checked;
 	applyApartmentFilters();
 });
 

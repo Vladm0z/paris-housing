@@ -2,35 +2,39 @@ name: Refresh Data
 
 on:
   schedule:
-    # Run every Monday at 06:00 UTC
-    - cron: '0 6 * * 1'
+    - cron: '0 6 1,15 * *'
   workflow_dispatch:
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    
-    - name: Run CROUS scraper
-      run: python scripts/scrape.py
-    
-    - name: Run apartment scraper
-      run: python scripts/scrape_apartments.py
-    
-    - name: Run amenities scraper
-      run: python scripts/scrape_amenities.py
-    
-    - name: Commit and push data
-      run: |
-        git config user.name "data-bot"
-        git config user.email "bot@noreply.github.com"
-        git add data/
-        git diff --cached --quiet || git commit -m "data refresh $(date -u +%F)"
-        git push
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          
+      - name: Install ML dependencies
+        run: pip install scikit-learn numpy
+        
+      - name: Run CROUS scraper
+        run: python scripts/scrape.py
+        
+      - name: Run apartment scraper
+        run: python scripts/scrape_apartments.py
+        
+      - name: Train price prediction model
+        run: python scripts/train_price_model.py
+        
+      - name: Run amenities scraper
+        run: python scripts/scrape_amenities.py
+        
+      - name: Commit and push data
+        run: |
+          git config user.name "data-bot"
+          git config user.email "bot@noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "data refresh $(date -u +%F)"
+          git push

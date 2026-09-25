@@ -111,6 +111,7 @@ def parse_bienici_ad(ad: dict) -> dict:
         "blur_radius": blur.get("radius"),
         "description": ad.get("description", ""),
         "energy_class": ad.get("energyClassification"),
+        "climate_class": ad.get("climateClassification") or ad.get("greenhouseGasClassification") or ad.get("gesClassification"),
         "furnished": ad.get("isFurnished"),
         "publication_date": ad.get("publicationDate"),
         "photos": photos[:5],
