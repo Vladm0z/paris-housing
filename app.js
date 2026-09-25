@@ -466,7 +466,7 @@ function applyApartmentFilters() {
 	for (const l of filtered) {
 		if (!bounds.contains([l.lat, l.lon])) continue;
 		const priceLabel = l.price >= 1000
-		? Math.floor(l.price / 100) / 10 + 'k'
+		? Math.round(l.price / 100) / 10 + 'k'
 		: String(l.price);
 		const bgColor = dealColor(l.deal_score);
 		const icon = L.divIcon({
