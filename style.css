@@ -19,6 +19,9 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 .fine { margin-top: 4px; color: #777; font-size: 11px; }
 
 /* menu panel */
+.panel, .panel * {
+	box-sizing: border-box;
+}
 .panel { max-width: 280px; max-height: 80vh; overflow-y: auto; }
 .panel-btn { background: none; border: none; padding: 0; font: inherit;
              color: #0d47a1; cursor: pointer; }
@@ -45,12 +48,37 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 /* apartment filter controls */
 .apt-filters { border-top: 1px solid #e0e0e0; padding-top: 6px; margin-top: 6px; }
 .apt-filters.hidden { display: none; }
-.apt-filter-row { display: flex; align-items: center; gap: 6px; margin: 3px 0; font-size: 12px; }
-.apt-filter-row label { min-width: 65px; color: #555; }
-.apt-filter-row input[type="range"] { flex: 1; }
-.apt-filter-row select { flex: 1; font-size: 11px; }
-.apt-filter-row .val { min-width: 50px; text-align: right; font-weight: 600; color: #333; }
-
+.apt-filter-row { 
+  display: flex; 
+  align-items: center; 
+  gap: 6px; 
+  margin: 4px 0; 
+  font-size: 12px; 
+  width: 100%;
+}
+.apt-filter-row label { 
+  min-width: 55px; 
+  flex-shrink: 0;
+  color: #555; 
+}
+.apt-filter-row input[type="range"] { 
+  flex: 1; 
+  min-width: 0;
+  width: 100%;
+}
+.apt-filter-row select { 
+  flex: 1; 
+  min-width: 0;
+  font-size: 11px; 
+}
+.apt-filter-row .val { 
+  min-width: 45px; 
+  flex-shrink: 0;
+  text-align: right; 
+  font-weight: 600; 
+  color: #333; 
+  white-space: nowrap;
+}
 /* amenity sub-toggles */
 .amenity-sub { margin-left: 22px; }
 .amenity-sub .layer-toggle { font-size: 11px; }
