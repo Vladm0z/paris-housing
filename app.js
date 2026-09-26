@@ -72,12 +72,30 @@ const amenityVisible = {};
 
 /* Apartment filter state */
 const aptFilter = {
+	transaction: 'rent',
 	priceMin: 0, priceMax: 5000,
 	surfaceMin: 0, roomsMin: 0,
 	energyClass: '',
 	onlyGoodDeals: false,
 	furnished: ''
 };
+
+const PRICE_CONF = {
+	rent: { max: 5000, step: 50, fmt: v => v + ' €' },
+	buy:  { max: 2000, step: 25, fmt: v => v + ' k€' },
+};
+
+function listingPriceInSliderUnits(l) {
+	return aptFilter.transaction === 'buy' ? (l.price || 0) / 1000 : (l.price || 0);
+}
+
+function priceLabelFor(l) {
+	const p = l.price;
+	if (!p) return '?';
+	if ((l.transaction || 'rent') === 'buy')
+		return p >= 1e6 ? (Math.round(p / 1e5) / 10) + 'M' : Math.round(p / 1000) + 'k';
+	return p >= 1000 ? Math.round(p / 100) / 10 + 'k' : String(p);
+}
 
 /* curated official campus/access maps: [pattern, label, url] */
 const CAMPUS_MAPS = [
@@ -433,7 +451,8 @@ function popupHtml(places, statuses, oks) {
 let allApartments = [];
 
 function apartmentPassesFilter(l) {
-	const price = l.price || 0;
+	if ((l.transaction || 'rent') !== aptFilter.transaction) return false;
+	const price = listingPriceInSliderUnits(l);
 	const surface = l.surface_m2 || 0;
 	const rooms = l.rooms || 0;
 
@@ -468,9 +487,7 @@ function applyApartmentFilters() {
 	const bounds = map.getBounds().pad(0.2);
 	for (const l of filtered) {
 		if (!bounds.contains([l.lat, l.lon])) continue;
-		const priceLabel = l.price >= 1000
-		? Math.round(l.price / 100) / 10 + 'k'
-		: String(l.price);
+		const priceLabel = priceLabelFor(l);
 		const bgColor = dealColor(l.deal_score);
 		const icon = L.divIcon({
 			className: 'apt-marker-wrapper',
@@ -525,6 +542,14 @@ function apartmentPopup(l) {
 	const blurNote = `<div class="fine" style="margin-top:4px;color:#888;"> Position approximate - source blurs exact location</div>`;
 	const dpeBadge = l.energy_class
 		? `<span class="apt-energy" style="background:${dpeColor}">${esc(l.energy_class.toUpperCase())}</span>` : '';
+	const isBuy = (l.transaction || 'rent') === 'buy';
+	const priceSmall = isBuy ? '' : ' <small>/month</small>';
+	const ppm2 = isBuy && l.surface_m2 ? Math.round(l.price / l.surface_m2) : null;
+	
+	const predictedLine = l.predicted_price
+		? `<div class="apt-predicted">Estimated market: ${l.predicted_price.toLocaleString('fr-FR')} ${isBuy ? '€' : '€/month'}</div>`
+		: '';
+
 	const dealBadge = l.deal_score != null ? (() => {
 		const pct = Math.round((1 - l.deal_score) * 100);
 		if (l.deal_score <= 0.85) return `<span class="badge deal-good">${pct}% below market</span>`;
@@ -532,10 +557,6 @@ function apartmentPopup(l) {
 		if (l.deal_score >= 1.15) return `<span class="badge deal-bad">${Math.abs(pct)}% above market</span>`;
 		return `<span class="badge deal-neutral">at market price</span>`;
 	})() : '';
-
-	const predictedLine = l.predicted_price
-		? `<div class="apt-predicted">Estimated market: ${l.predicted_price.toLocaleString('fr-FR')} €/month</div>`
-		: '';
 
 	let sourcesHtml = '';
 	if (l.sources) {
@@ -555,7 +576,7 @@ function apartmentPopup(l) {
 	return `<div class="pop">
 		<h3>${esc(l.title || 'Apartment')}</h3>
 		${l.sources ? '<span class="badge multi">multi-source listing</span>' : ''}
-		<div class="apt-price">${fmtPrice(l.price)} <small>/month</small> ${dealBadge}</div>
+		<div class="apt-price">${fmtPrice(l.price)}${priceSmall} ${dealBadge}</div>
 		${predictedLine}
 		${photoHtml}
 		<dl class="apt-details">
@@ -565,6 +586,7 @@ function apartmentPopup(l) {
 			<dt>DPE</dt><dd>${dpeBadge || 'n/a'}</dd>
 			<dt>Furnished</dt><dd>${l.furnished == null ? 'n/a' : l.furnished ? 'Yes' : 'No'}</dd>
 			<dt>Area</dt><dd>${esc(l.district || l.postal_code || 'Paris')}</dd>
+			${isBuy ? `<dt>Price/m²</dt><dd>${ppm2 ? ppm2.toLocaleString('fr-FR') + ' €' : 'n/a'}</dd>` : ''}
 		</dl>
 		${l.description ? `<div class="desc">${esc(trunc(stripHtml(l.description), 250))}</div>` : ''}
 		${sourcesHtml}
@@ -575,7 +597,10 @@ function apartmentPopup(l) {
 
 function initApartmentLayer(data) {
 	allApartments = (data.listings || []).filter(l => l.lat && l.lon);
-	layers.apartments.count = allApartments.length;
+	layers.apartments.countByType = {
+		rent: allApartments.filter(l => (l.transaction || 'rent') === 'rent').length,
+		buy: allApartments.filter(l => l.transaction === 'buy').length,
+	};
 	applyApartmentFilters();
 }
 
@@ -793,6 +818,13 @@ panel.onAdd = () => {
 			<!-- APARTMENT FILTERS -->
 			<div class="panel-sec apt-filters" id="apt-filters"><b>apartment search</b>
 				<div class="apt-filter-row">
+					<label>Mode</label>
+					<select id="apt-transaction">
+						<option value="rent">Renting</option>
+						<option value="buy">Buying</option>
+					</select>
+				</div>
+				<div class="apt-filter-row">
 					<label>Min price</label>
 					<input type="range" id="apt-price-min" min="0" max="2000" step="50" value="0">
 					<span class="val" id="apt-price-min-val">0 €</span>
@@ -807,7 +839,7 @@ panel.onAdd = () => {
 					<input type="range" id="apt-surface" min="0" max="80" step="5" value="0">
 					<span class="val" id="apt-surface-val">0 m²</span>
 				</div>
-				<div class="apt-filter-row">
+				<div class="apt-filter-row" id="apt-furnished-row">
 					<label>Furnished</label>
 					<select id="apt-furnished">
 						<option value="">Any</option>
@@ -842,7 +874,6 @@ panel.onAdd = () => {
 					<input type="checkbox" id="apt-deals"> Only good deals (below market)
 				</label>
 				<div class="fine" id="apt-result-line"></div>
-				<div class="fine" id="apt-result-line"></div>
 			</div>
 
 			<!-- PROFILE (cafeteria filter) -->
@@ -876,6 +907,23 @@ document.getElementById('panel-toggle').addEventListener('click', () => {
 	document.getElementById('panel-toggle').textContent = hidden ? '[ menu ]' : '[ close ]';
 });
 
+document.getElementById('apt-transaction').addEventListener('change', e => {
+	aptFilter.transaction = e.target.value;
+	const conf = PRICE_CONF[aptFilter.transaction];
+	const smin = document.getElementById('apt-price-min');
+	const smax = document.getElementById('apt-price-max');
+	smin.max = conf.max; smin.step = conf.step; smin.value = 0;
+	smax.max = conf.max; smax.step = conf.step; smax.value = conf.max;
+	aptFilter.priceMin = 0;
+	aptFilter.priceMax = conf.max;
+	document.getElementById('apt-price-min-val').textContent = conf.fmt(0);
+	document.getElementById('apt-price-max-val').textContent = conf.fmt(conf.max);
+	// furnished is only meaningful for rentals
+	document.getElementById('apt-furnished-row').style.display =
+		aptFilter.transaction === 'rent' ? '' : 'none';
+	applyApartmentFilters();
+});
+
 // Layer toggles
 for (const name of ['cafeterias', 'apartments', 'amenities']) {
 	document.getElementById('lyr-' + name).addEventListener('change', e => {
@@ -892,12 +940,12 @@ for (const name of ['cafeterias', 'apartments', 'amenities']) {
 // Apartment filters
 document.getElementById('apt-price-min').addEventListener('input', e => {
 	aptFilter.priceMin = +e.target.value;
-	document.getElementById('apt-price-min-val').textContent = e.target.value + ' €';
+	document.getElementById('apt-price-min-val').textContent = PRICE_CONF[aptFilter.transaction].fmt(+e.target.value);
 	applyApartmentFilters();
 });
 document.getElementById('apt-price-max').addEventListener('input', e => {
 	aptFilter.priceMax = +e.target.value;
-	document.getElementById('apt-price-max-val').textContent = e.target.value + ' €';
+	document.getElementById('apt-price-max-val').textContent = PRICE_CONF[aptFilter.transaction].fmt(+e.target.value);
 	applyApartmentFilters();
 });
 document.getElementById('apt-surface').addEventListener('input', e => {
@@ -959,8 +1007,10 @@ function buildAmenitySubToggles() {
 }
 
 function updateFilterCounts() {
+	const t = aptFilter.transaction;
+	const total = (layers.apartments.countByType || {})[t] || 0;
 	const el = document.getElementById('apt-result-line');
-	if (el) el.textContent = `showing ${layers.apartments.filtered} of ${layers.apartments.count} listings`;
+	if (el) el.textContent = `showing ${layers.apartments.filtered} of ${total} ${t === 'buy' ? 'sales' : 'rentals'}`;
 	const cnt = document.getElementById('cnt-apartments');
 	if (cnt) cnt.textContent = `(${layers.apartments.filtered})`;
 }

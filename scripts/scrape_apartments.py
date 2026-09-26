@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Scrape Paris rental apartment listings from Bien'ici.
-Bien'ici exposes a public JSON API at /realEstateAds.json.
+"""Scrape Paris apartment listings (rent + sale) from Bien'ici.
+
+The same public JSON API serves both markets: filterType=rent / filterType=buy.
+Each listing carries a "transaction" field so the frontend and the price model
+can treat them separately.
+
 Output: data/apartments.json
 """
-
-import json, re, time, hashlib, urllib.parse, urllib.request
+import json, time, hashlib, urllib.parse, urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +25,9 @@ HEADERS = {
 BIENICI_API = "https://www.bienici.com/realEstateAds.json"
 BIENICI_SUGGEST = "https://res.bienici.com/suggest.json"
 
+# Sanity price ranges per transaction type (EUR)
+PRICE_RANGE = {"rent": (100, 15000), "buy": (20000, 5000000)}
+
 
 def get_bienici_zone_id(location_slug: str) -> list:
     url = f"{BIENICI_SUGGEST}?q={urllib.parse.quote(location_slug)}"
@@ -33,22 +39,20 @@ def get_bienici_zone_id(location_slug: str) -> list:
     return data[0].get("zoneIds", [])
 
 
-def fetch_bienici_rentals(location="paris-75", max_pages=50, max_items=2000):
-    """Fetch rental listings from Bien'ici public JSON API.
-    Bien'ici caps visible results at ~2500
-    """
+def fetch_bienici_listings(location="paris-75", transaction="rent",
+                           max_pages=55, max_items=1500):
+    """Fetch listings for one transaction type ('rent' or 'buy')."""
     zone_ids = get_bienici_zone_id(location)
     print(f"  Bien'ici zone IDs for {location}: {zone_ids}")
 
     listings = []
     page = 1
-
     while page <= max_pages and len(listings) < max_items:
         filters = {
             "size": 24,
             "from": (page - 1) * 24,
             "page": page,
-            "filterType": "rent",
+            "filterType": transaction,
             "propertyType": ["flat"],
             "zoneIdsByTypes": {"zoneIds": zone_ids},
             "sortBy": "publicationDate",
@@ -64,7 +68,6 @@ def fetch_bienici_rentals(location="paris-75", max_pages=50, max_items=2000):
         req = urllib.request.Request(url, headers={
             **HEADERS, "referer": "https://www.bienici.com/"
         })
-
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
                 payload = json.loads(r.read().decode())
@@ -75,10 +78,10 @@ def fetch_bienici_rentals(location="paris-75", max_pages=50, max_items=2000):
         ads = payload.get("realEstateAds", [])
         total = payload.get("total", 0)
         if page == 1:
-            print(f"  Bien'ici total results: {total}")
+            print(f"  Bien'ici total results ({transaction}): {total}")
 
         for ad in ads:
-            listings.append(parse_bienici_ad(ad))
+            listings.append(parse_bienici_ad(ad, transaction))
 
         print(f"  page {page}: +{len(ads)} (cumulative {len(listings)})")
         if not ads or len(listings) >= total:
@@ -89,16 +92,17 @@ def fetch_bienici_rentals(location="paris-75", max_pages=50, max_items=2000):
     return listings[:max_items]
 
 
-def parse_bienici_ad(ad: dict) -> dict:
+def parse_bienici_ad(ad: dict, transaction: str) -> dict:
     photos = [p.get("url_photo", p.get("url", "")) for p in ad.get("photos", [])]
     blur = ad.get("blurInfo", {})
     pos = blur.get("position") or blur.get("centroid") or {}
     return {
         "source": "bienici",
         "source_id": ad.get("id", ""),
+        "transaction": transaction,
         "title": ad.get("title", ""),
         "price": ad.get("price"),
-        "price_unit": "EUR/month",
+        "price_unit": "EUR/month" if transaction == "rent" else "EUR",
         "surface_m2": ad.get("surfaceArea"),
         "rooms": ad.get("roomsQuantity"),
         "bedrooms": ad.get("bedroomsQuantity"),
@@ -115,16 +119,18 @@ def parse_bienici_ad(ad: dict) -> dict:
         "furnished": ad.get("isFurnished"),
         "publication_date": ad.get("publicationDate"),
         "photos": photos[:5],
-        "url": f"https://www.bienici.com/annonce/location/{ad.get('id', '')}",
+        "url": f"https://www.bienici.com/annonce/location/{ad.get('id', '')}" if transaction == "rent"
+               else f"https://www.bienici.com/annonce/vente/{ad.get('id', '')}",
         "agency": (ad.get("contact") or {}).get("contactName", ""),
     }
 
 
 def listing_fingerprint(l: dict) -> str:
-    """Fuzzy fingerprint for deduplication within Bien'ici results."""
+    """Fuzzy fingerprint; includes transaction so rent/buy never merge."""
     price_bucket = round((l.get("price") or 0) / 50) * 50
     surface_bucket = round((l.get("surface_m2") or 0) / 3) * 3
-    key = f"{l.get('postal_code', '')}|{price_bucket}|{surface_bucket}|{l.get('rooms', '')}"
+    key = (f"{l.get('transaction', 'rent')}|{l.get('postal_code', '')}|"
+           f"{price_bucket}|{surface_bucket}|{l.get('rooms', '')}")
     return hashlib.md5(key.encode()).hexdigest()
 
 
@@ -154,25 +160,37 @@ def deduplicate(listings: list) -> list:
 
 
 def main():
-    print("Scraping Paris rental apartments\n")
+    print("=== Scraping Paris apartments (rent + buy) ===\n")
 
-    print("[1/2] Bien'ici...")
-    listings = fetch_bienici_rentals(location="paris-75", max_pages=55, max_items=1500)
-    print(f"  -> {len(listings)} listings\n")
+    all_listings = []
+    for ttype in ("rent", "buy"):
+        print(f"[{ttype}] Bien'ici...")
+        lst = fetch_bienici_listings(transaction=ttype)
+        print(f"  -> {len(lst)} listings\n")
+        all_listings.extend(lst)
+        time.sleep(2)
 
-    print("[2/2] Deduplicating...")
-    merged = deduplicate(listings)
-    dupes = len(listings) - len(merged)
-    print(f"  -> {len(merged)} unique ({dupes} duplicates merged)")
-    
-    before = len(merged)
-    merged = [l for l in merged if l.get("price") and 100 <= l["price"] <= 15000]
-    print(f"  -> price filter: dropped {before - len(merged)} outliers")
-   
-    with_coords = sum(1 for l in merged if l.get("lat"))
-    multi_source = sum(1 for l in merged if l.get("sources"))
-    prices = [l["price"] for l in merged if l.get("price")]
-    avg_price = sum(prices) / len(prices) if prices else 0
+    print("Deduplicating...")
+    merged = deduplicate(all_listings)
+    print(f"  -> {len(merged)} unique ({len(all_listings) - len(merged)} duplicates merged)")
+
+    kept = []
+    for l in merged:
+        lo, hi = PRICE_RANGE.get(l.get("transaction", "rent"), (0, 10**12))
+        if l.get("price") and lo <= l["price"] <= hi:
+            kept.append(l)
+    print(f"  -> price filter: dropped {len(merged) - len(kept)} outliers")
+
+    with_coords = sum(1 for l in kept if l.get("lat"))
+    per_type = {}
+    for ttype in ("rent", "buy"):
+        prices = [l["price"] for l in kept if l.get("transaction") == ttype and l.get("price")]
+        per_type[ttype] = {
+            "count": len(prices),
+            "avg_price": round(sum(prices) / len(prices)) if prices else 0,
+            "min_price": min(prices) if prices else None,
+            "max_price": max(prices) if prices else None,
+        }
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({
@@ -180,15 +198,15 @@ def main():
         "sources": ["bienici.com"],
         "note": ("SeLoger changed URL structure and blocks scrapers; dropped. "
                  "Jinka has no public API; skipped."),
-        "count": len(merged),
-        "stats": {"with_coordinates": with_coords, "multi_source": multi_source,
-                  "average_price": round(avg_price)},
-        "listings": merged,
+        "count": len(kept),
+        "stats": {"with_coordinates": with_coords, "per_transaction": per_type},
+        "listings": kept,
     }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
-    print(f"\nWrote {OUT}: {len(merged)} listings, {with_coords} with coords")
-    if prices:
-        print(f"  Price: {min(prices)} - {max(prices)} EUR (avg {avg_price:.0f})")
+    print(f"\nWrote {OUT}: {len(kept)} listings, {with_coords} with coords")
+    for ttype, s in per_type.items():
+        print(f"  {ttype}: {s['count']} listings, "
+              f"price {s['min_price']} - {s['max_price']} (avg {s['avg_price']})")
 
 
 if __name__ == "__main__":
