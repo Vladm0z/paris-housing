@@ -75,7 +75,8 @@ const aptFilter = {
 	priceMin: 0, priceMax: 5000,
 	surfaceMin: 0, roomsMin: 0,
 	energyClass: '',
-	onlyGoodDeals: false
+	onlyGoodDeals: false,
+	furnished: ''
 };
 
 /* curated official campus/access maps: [pattern, label, url] */
@@ -441,6 +442,8 @@ function apartmentPassesFilter(l) {
 	if (rooms < aptFilter.roomsMin) return false;
 	if (aptFilter.energyClass && (l.energy_class || '').toUpperCase() !== aptFilter.energyClass) return false;
 	if (aptFilter.onlyGoodDeals && (l.deal_score == null || l.deal_score > 0.9)) return false;
+	if (aptFilter.furnished === 'yes' && l.furnished !== true) return false;
+	if (aptFilter.furnished === 'no' && l.furnished !== false) return false;
 	return true;
 }
 
@@ -805,6 +808,14 @@ panel.onAdd = () => {
 					<span class="val" id="apt-surface-val">0 m²</span>
 				</div>
 				<div class="apt-filter-row">
+					<label>Furnished</label>
+					<select id="apt-furnished">
+						<option value="">Any</option>
+						<option value="yes">Furnished</option>
+						<option value="no">Unfurnished</option>
+					</select>
+				</div>
+				<div class="apt-filter-row">
 					<label>Min rooms</label>
 					<select id="apt-rooms">
 						<option value="0">Any</option>
@@ -892,6 +903,10 @@ document.getElementById('apt-price-max').addEventListener('input', e => {
 document.getElementById('apt-surface').addEventListener('input', e => {
 	aptFilter.surfaceMin = +e.target.value;
 	document.getElementById('apt-surface-val').textContent = e.target.value + ' m²';
+	applyApartmentFilters();
+});
+document.getElementById('apt-furnished').addEventListener('change', e => {
+	aptFilter.furnished = e.target.value;
 	applyApartmentFilters();
 });
 document.getElementById('apt-rooms').addEventListener('change', e => {
