@@ -34,6 +34,11 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 .panel .chk { display: block; font-size: 12px; margin-top: 4px; }
 .panel .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%;
               margin-right: 6px; vertical-align: -2px; border: 1px solid #0006; }
+.panel .dot,
+.layer-toggle input,
+.panel input[type="checkbox"] { flex-shrink: 0; }
+.panel input[type="checkbox"] { width: 15px; height: 15px; margin: 0; }
+.panel .chk { display: flex; align-items: flex-start; gap: 6px; }
 
 /* layer toggles */
 .layer-toggles { border-top: 1px solid #e0e0e0; padding-top: 6px; margin-top: 6px; }
@@ -168,22 +173,34 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 
 /* mobile adjustments */
 @media (max-width: 600px) {
-  .leaflet-top.leaflet-right {
-    left: 0;
-    right: 0;
-  }
+  .leaflet-top.leaflet-right { left: 0; right: 0; }
   .leaflet-top.leaflet-right .title {
-    float: none;
-    width: max-content;
-    max-width: 92vw;
-    margin: 8px auto 0;
-    pointer-events: none;
+    float: none; width: max-content; max-width: 92vw;
+    margin: 8px auto 0; pointer-events: none;
   }
-  .title b,
-  .title span.fine { display: none; }
+  .title b, .title span.fine { display: none; }
   .title #clock { display: inline; }
-  .panel { max-width: 85vw; max-height: 60vh; }
+  .panel { max-width: 78vw; max-height: 70vh; font-size: 12px; }
+  .panel-sec { margin: 4px 0; }
+  .panel-sec b { font-size: 10px; }
+  .layer-toggle { font-size: 11px; gap: 5px; margin: 2px 0; }
+  .layer-toggle .layer-icon { width: 14px; height: 14px; font-size: 9px; }
+  .layer-toggle .layer-count { font-size: 10px; }
+  .panel .chk { font-size: 11px; }
+  .panel select { font-size: 11px; }
+  .panel .dot { width: 10px; height: 10px; }
+  .amenity-sub { max-height: 112px; overflow-y: auto; margin-left: 16px; }
+  .apt-filter-row { flex-wrap: wrap; margin: 6px 0; row-gap: 2px; }
+  .apt-filter-row label { order: 1; flex: 1 1 auto; min-width: 0; }
+  .apt-filter-row .val { order: 2; min-width: 40px; }
+  .apt-filter-row input[type="range"],
+  .apt-filter-row select { order: 3; flex: 1 1 100%; min-width: 0; }
+  .apt-filter-row input[type="range"] { height: 26px; margin: 0; }
+  .mobile-popup .leaflet-popup-content { font-size: 12px; }
+  .mobile-popup .pop h3 { font-size: 14px; }
+  .mobile-popup .apt-popup .apt-price { font-size: 17px; }
 }
+
 .mobile-popup .leaflet-popup-content-wrapper { max-width: min(360px, 85vw) !important;
   border-radius: 8px; }
 .mobile-popup .leaflet-popup-content { margin: 12px !important; max-height: 55vh;
@@ -194,9 +211,9 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 
 @media (max-width: 400px) {
   .leaflet-control.box { font-size: 11px; padding: 6px 8px; max-width: 45vw; }
+  .leaflet-control.box.panel { max-width: 92vw; }
   .title b { font-size: 12px; }
-  .panel { max-width: 60vw; }
-  .panel .dot { width: 10px; height: 10px; }
+  .panel .dot { width: 9px; height: 9px; }
 }
 
 /* menu tabs */
