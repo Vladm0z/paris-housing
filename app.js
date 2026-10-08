@@ -194,45 +194,108 @@ function resolveMenus(p) {
 		.filter(ref => ref.m != null && GLOBAL_MENUS[ref.m])
 		.map(ref => ({ date: ref.date, repas: GLOBAL_MENUS[ref.m], _ref: ref.m }));
 }
+function groupMenus(menuList) {
+	if (!menuList || !menuList.length) return [];
+	const groups = [];
+	const getRef = (m) => m._ref !== undefined ? m._ref : JSON.stringify(m.repas);
+	let currentGroup = { 
+		 dates: [menuList[0].date], 
+		 repas: menuList[0].repas, 
+		 ref: getRef(menuList[0]) 
+	 };
+	 for (let i = 1; i < menuList.length; i++) {
+		 if (getRef(menuList[i]) === currentGroup.ref) {
+			 currentGroup.dates.push(menuList[i].date);
+		 } else {
+			 groups.push(currentGroup);
+			 currentGroup = { 
+				 dates: [menuList[i].date], 
+				 repas: menuList[i].repas, 
+				 ref: getRef(menuList[i]) 
+			 };
+		 }
+	 }
+	 groups.push(currentGroup);
+	 return groups;
+}
 
 function renderMenus(menus, p) {
 	menus = usableMenus(menus);
-	const allSame = menus.length > 1 && menus.every(m => m._ref === menus[0]._ref);
-	if (menus.length === 0) return '';
-
+	const crousMenus = usableMenus(p.crous_menu || []);
+	const hasCrousMenu = crousMenus.length > 0;
+	const hasCroustillantMenu = menus.length > 0;
+	
+	if (!hasCrousMenu && !hasCroustillantMenu) return '';
+	
 	let html = '<div class="menu-today">';
-	if (allSame) {
-		const first = formatDateLabel(parseCroustillantDate(menus[0].date));
-		const last = formatDateLabel(parseCroustillantDate(menus[menus.length - 1].date));
-		html += `<div class="menu-range">Menu ${esc(first)} – ${esc(last)} (unchanged)</div>`;
-		menus = [menus[0]];
-	} else if (menus.length > 1) {
-		html += '<div class="menu-tabs">';
-		menus.forEach((m, i) => {
-			const label = formatDateLabel(parseCroustillantDate(m.date));
-			html += `<button type="button" class="menu-tab ${i === 0 ? 'active' : ''}" data-tab="${i}">${label}</button>`;
-		});
+	
+	// If we have BOTH sources, show main tabs to switch between them
+	if (hasCrousMenu && hasCroustillantMenu) {
+		html += '<div class="menu-tabs main-tabs">';
+		html += `<button type="button" class="menu-tab active" data-tab="0">CROUS Paris</button>`;
+		html += `<button type="button" class="menu-tab" data-tab="1">CROUStillant</button>`;
 		html += '</div>';
 	}
-	menus.forEach((m, i) => {
-		const hidden = (!allSame && i > 0) ? 'display:none;' : '';
-		html += `<div class="menu-content" data-tab="${i}" style="${hidden}">`;
-		for (const repas of m.repas) {
-			const mealType = repas.type === 'soir' ? 'Dinner' : (repas.type === 'midi' ? 'Lunch' : repas.type);
-			html += `<div class="meal"><i>${esc(mealType)}</i>`;
-			for (const cat of repas.categories) {
-				const items = cat.plats.map(p => esc(p)).join(', ');
-				html += `<div class="cat"><b>${esc(cat.libelle)}:</b> ${items}</div>`;
-			}
-			html += `</div>`;
+	
+	const renderMenuList = (menuList, tabPrefix) => {
+		let h = '';
+		const groups = groupMenus(menuList);
+		
+		if (groups.length === 1 && groups[0].dates.length > 1) {
+			const first = formatDateLabel(parseCroustillantDate(groups[0].dates[0]));
+			const last = formatDateLabel(parseCroustillantDate(groups[0].dates[groups[0].dates.length - 1]));
+			h += `<div class="menu-range">Menu ${esc(first)} – ${esc(last)} (unchanged)</div>`;
 		}
+		else if (groups.length > 1) {
+			h += `<div class="menu-tabs ${tabPrefix}-tabs">`;
+			groups.forEach((g, i) => {
+				let label = formatDateLabel(parseCroustillantDate(g.dates[0]));
+				if (g.dates.length > 1) {
+					const lastDate = formatDateLabel(parseCroustillantDate(g.dates[g.dates.length - 1]));
+					label += ` – ${lastDate}`;
+				}
+				h += `<button type="button" class="menu-tab ${i === 0 ? 'active' : ''}" data-${tabPrefix}-tab="${i}">${label}</button>`;
+			});
+			h += '</div>';
+		}
+		
+		groups.forEach((g, i) => {
+			const hiddenDay = (groups.length > 1 && i > 0) ? 'display:none;' : '';
+			h += `<div class="menu-day-content" data-${tabPrefix}-tab="${i}" style="${hidden}">`;
+			for (const repas of g.repas) {
+				const mealType = repas.type === 'soir' ? 'Dinner' : (repas.type === 'midi' ? 'Lunch' : repas.type);
+				h += `<div class="meal"><i>${esc(mealType)}</i>`;
+				for (const cat of repas.categories) {
+					const items = cat.plats.map(it => esc(it)).join(', ');
+					h += `<div class="cat"><b>${esc(cat.libelle)}:</b> ${items}</div>`;
+				}
+				h += `</div>`;
+			}
+			h += '</div>';
+		});
+		return h;
+	};
+	
+	if (hasCrousMenu) {
+		html += `<div class="menu-content" data-tab="0">`;
+		html += renderMenuList(crousMenus, 'crous');
+		html += `<div class="menu-credit">Data from <a href="https://www.crous-paris.fr/se-restaurer/carte/" target="_blank" rel="noopener">CROUS Paris</a></div>`;
 		html += '</div>';
-	});
-	let creditUrl = 'https://croustillant.menu';
-	if (p && p.croustillant_code && p.croustillant_slug) {
-		creditUrl = `https://croustillant.menu/fr/restaurants/${p.croustillant_slug}-r${p.croustillant_code}`;
 	}
-	html += `<div class="menu-credit">Data from <a href="${creditUrl}" target="_blank" rel="noopener">CROUStillant</a></div>`;
+	
+	if (hasCroustillantMenu) {
+		const tabIdx = hasCrousMenu ? 1 : 0;
+		const hidden = hasCrousMenu ? 'display:none;' : '';
+		html += `<div class="menu-content" data-tab="${tabIdx}" style="${hidden}">`;
+		html += renderMenuList(menus, 'croustillant');
+		let creditUrl = 'https://croustillant.menu';
+		if (p && p.croustillant_code && p.croustillant_slug) {
+			creditUrl = `https://croustillant.menu/fr/restaurants/${p.croustillant_slug}-r${p.croustillant_code}`;
+		}
+		html += `<div class="menu-credit">Data from <a href="${creditUrl}" target="_blank" rel="noopener">CROUStillant</a></div>`;
+		html += '</div>';
+	}
+	
 	html += '</div>';
 	return html;
 }
@@ -241,11 +304,28 @@ document.addEventListener('click', (e) => {
 	if (e.target.classList.contains('menu-tab')) {
 		const popup = e.target.closest('.leaflet-popup-content-wrapper');
 		if (!popup) return;
-		const tabs = popup.querySelectorAll('.menu-tab');
-		const contents = popup.querySelectorAll('.menu-content');
-		const idx = e.target.dataset.tab;
-		tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
-		contents.forEach(c => c.style.display = c.dataset.tab === idx ? 'block' : 'none');
+		
+		if (e.target.hasAttribute('data-tab')) {
+			const tabs = popup.querySelectorAll('.menu-tab[data-tab]');
+			const contents = popup.querySelectorAll('.menu-content[data-tab]');
+			const idx = e.target.dataset.tab;
+			tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === idx));
+			contents.forEach(c => c.style.display = c.dataset.tab === idx ? 'block' : 'none');
+		} 
+		else if (e.target.hasAttribute('data-crous-tab')) {
+			const tabs = popup.querySelectorAll('.menu-tab[data-crous-tab]');
+			const contents = popup.querySelectorAll('.menu-day-content[data-crous-tab]');
+			const idx = e.target.dataset.crousTab;
+			tabs.forEach(t => t.classList.toggle('active', t.dataset.crousTab === idx));
+			contents.forEach(c => c.style.display = c.dataset.crousTab === idx ? 'block' : 'none');
+		}
+		else if (e.target.hasAttribute('data-croustillant-tab')) {
+			const tabs = popup.querySelectorAll('.menu-tab[data-croustillant-tab]');
+			const contents = popup.querySelectorAll('.menu-day-content[data-croustillant-tab]');
+			const idx = e.target.dataset.croustillantTab;
+			tabs.forEach(t => t.classList.toggle('active', t.dataset.croustillantTab === idx));
+			contents.forEach(c => c.style.display = c.dataset.croustillantTab === idx ? 'block' : 'none');
+		}
 	}
 });
 
@@ -402,7 +482,9 @@ function venueHtml(p, s, ok) {
 		notices += `<div class="desc">${esc(p.description)}</div>`;
 	if ((p.conditional_days || []).length)
 		notices += `<div class="notice">[i] ${p.conditional_days.map(d => WD[d]).join(', ')} opening depends on the university calendar</div>`;
-	const menuHtml = renderMenus(resolveMenus(p), p);
+	const menuHtml = p.closure_status === 'confirmed'
+		? ''
+		: renderMenus(resolveMenus(p), p);
 	const dimBadge = ok ? '' : `<span class="badge dim">not accessible with your profile</span>`;
 	const cm = campusMapFor(p);
 	const venuePage = venuePageFor(p);

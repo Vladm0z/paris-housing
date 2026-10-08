@@ -4,6 +4,58 @@
 import json, re, time, urllib.parse, urllib.request, unicodedata
 from datetime import datetime, timezone, date, timedelta
 from pathlib import Path
+from html.parser import HTMLParser
+
+VENUE_PAGES = [
+    (re.compile(r'nation libre-service', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-nation-libre-service-2/'),
+    (re.compile(r'ru nation', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-nation/'),
+    (re.compile(r'cuvier|ru cuvier', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-cuvier-3/'),
+    (re.compile(r"l'express|lexpress", re.I),
+     'https://www.crous-paris.fr/restaurant/lexpress/'),
+    (re.compile(r"l'ardoise|brasserie l'ardoise", re.I),
+     'https://www.crous-paris.fr/restaurant/brasserie-lardoise-3/'),
+    (re.compile(r"l'atrium|cafeteria l'atrium", re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-latrium-3/'),
+    (re.compile(r'saint-guillaume|saint guillaume', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-saint-guillaume-sciences-po/'),
+    (re.compile(r'sciences po|café des sciences', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-sciences-po-3/'),
+    (re.compile(r'mabillon', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-mabillon-3/'),
+    (re.compile(r'châtelet|chatelet', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-chatelet-3/'),
+    (re.compile(r'ru dauphine', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-dauphine-3/'),
+    (re.compile(r'libre-service dauphine', re.I),
+     'https://www.crous-paris.fr/restaurant/libre-service-dauphine/'),
+    (re.compile(r'cafétéria dauphine|cafeteria dauphine', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-dauphine-3/'),
+    (re.compile(r'clignancourt', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-clignancourt-3/'),
+    (re.compile(r'halle aux farines', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-de-la-halle-aux-farines-3/'),
+    (re.compile(r'lacretelle|lacrépelle', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-lacretelle-3/'),
+    (re.compile(r'pharmacie', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-pharmacie-3/'),
+    (re.compile(r'cafétéria jourdan|cafeteria jourdan', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-jourdan/'),
+    (re.compile(r'portalis', re.I),
+     'https://www.crous-paris.fr/restaurant/libre-service-le-portalis-assas/'),
+    (re.compile(r'pierre mendès france|mendes france|pmf', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-pierre-mendes-france-3/'),
+    (re.compile(r'bullier', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-bullier-3/'),
+    (re.compile(r'villemin', re.I),
+     'https://www.crous-paris.fr/restaurant/cafeteria-villemin-3/'),
+    (re.compile(r'ru de la barge|ru barge', re.I),
+     'https://www.crous-paris.fr/restaurant/ru-la-barge-du-crous-de-paris-3/'),
+    (re.compile(r'buffon', re.I),
+     'https://www.crous-paris.fr/restaurant/restaurant-administratif-buffon-3/'),
+]
 
 API = ("https://mesr.opendatasoft.com/api/explore/v2.1/catalog/datasets/"
        "fr_crous_restauration_france_entiere/records")
@@ -21,6 +73,171 @@ TIME_RE = re.compile(r"\b(\d{1,2})\s*(?:[hH:](\d{2})|h)?\s*(?:à|-|–|—)\s*(\
 SEP_RE  = re.compile(r"\s*(?:,\s*)?(?:et|&)\s*")
 COND_RE = re.compile(r"selon\s+le\s+calendrier|susceptibles?\s+d['’][ée]tre\s+ouverts?", re.I)
 
+def get_crous_paris_url(name, address):
+    text = f"{name} {address}".lower()
+    for pattern, url in VENUE_PAGES:
+        if pattern.search(text):
+            return url
+    return None
+
+OFFICIAL_NOISE_RE = re.compile(
+    r"certains produits ne sont pas disponibles|"
+    r"menus élaborés sous réserve|"
+    r"^\s*(\.{3}|…|\+|ou|info|infos)\s*$",
+    re.I
+)
+
+def clean_official_plat(raw):
+    if not raw:
+        return None
+    s = raw.strip()
+    s = re.sub(r"\s*\([^)]*points?\)", "", s, flags=re.I)
+    s = re.sub(r"\s+\d+(?:[.,]\d+)?\s*points?\b", "", s, flags=re.I)
+    s = s.lstrip("*-–• ").strip()
+    s = re.sub(r"\s+", " ", s)
+    if not s:
+        return None
+    if OFFICIAL_NOISE_RE.search(s):
+        return None
+    return s
+
+class MultiDayMealParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.menus = {} # date -> list of meals
+        self.current_date = None
+        self.current_meal = None
+        self.current_cat = None
+        
+        self.state = None
+        self.ul_depth = 0
+        self.in_meal_foodies = False
+
+    def handle_starttag(self, tag, attrs):
+        attrs_dict = dict(attrs)
+        
+        if tag == 'time' and 'datetime' in attrs_dict:
+            self.current_date = attrs_dict['datetime']
+            if self.current_date not in self.menus:
+                self.menus[self.current_date] = []
+                
+        if tag == 'h4' and attrs_dict.get('class') == 'meal_title':
+            if self.current_date:
+                self.current_meal = {"type": "", "categories": []}
+                self.state = 'title'
+                
+        if tag == 'ul' and attrs_dict.get('class') == 'meal_foodies':
+            self.in_meal_foodies = True
+            
+        if self.current_meal is not None and self.in_meal_foodies:
+            if tag == 'ul': 
+                self.ul_depth += 1
+            if tag == 'li':
+                if self.ul_depth == 1: # Category level
+                    self.current_cat = {"libelle": "", "plats": []}
+                    self.state = 'cat_name'
+                elif self.ul_depth == 2: # Item level
+                    self.state = 'item'
+
+    def handle_endtag(self, tag):
+        if tag == 'h4' and self.state == 'title': self.state = None
+        
+        if self.in_meal_foodies:
+            if tag == 'ul':
+                self.ul_depth -= 1
+                if self.ul_depth == 1 and self.current_cat:
+                    clean_plats = []
+                    for p in self.current_cat["plats"]:
+                        cleaned = clean_official_plat(p)
+                        if cleaned:
+                            clean_plats.append(cleaned)
+                    libelle = re.sub(r"\s+", " ", self.current_cat["libelle"]).strip()
+                    self.current_cat["libelle"] = libelle
+                    self.current_cat["plats"] = clean_plats
+                    skip_cat = (
+                        not libelle
+                        or not clean_plats
+                        or libelle.lower() in {"info", "infos"}
+                    )
+                    if not skip_cat:
+                        self.current_meal["categories"].append(self.current_cat)
+                    self.current_cat = None
+                    
+                if self.ul_depth == 0:
+                    if self.current_meal and self.current_meal["categories"] and self.current_date:
+                        self.current_meal["type"] = re.sub(
+                            r"\s+", " ", self.current_meal["type"]
+                        ).strip()
+                        self.menus[self.current_date].append(self.current_meal)
+                    self.current_meal = None
+                    self.in_meal_foodies = False
+                    
+            if tag == 'li':
+                if self.state == 'cat_name': self.state = None
+                elif self.state == 'item': self.state = None
+
+    def handle_data(self, data):
+        text = data.strip()
+        if not text: return
+        
+        if self.state == 'title' and self.current_meal: self.current_meal["type"] += text + " "
+        elif self.state == 'cat_name' and self.current_cat: self.current_cat["libelle"] += text + " "
+        elif self.state == 'item' and self.current_cat: self.current_cat["plats"].append(text)
+
+def fetch_crous_paris_menu(url):
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; RestoU-Paris-Map/1.0)'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            html = response.read().decode('utf-8')
+    except Exception as e:
+        print(f"Warning: Could not fetch CROUS Paris menu from {url}: {e}")
+        return []
+
+    parser = MultiDayMealParser()
+    parser.feed(html)
+    
+    today = date.today()
+    max_date = today + timedelta(days=6)
+    
+    menus = []
+    for date_str, meals in parser.menus.items():
+        if meals:
+            try:
+                dt = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            
+            if dt < today or dt > max_date:
+                continue
+                
+            date_formatted = dt.strftime("%d-%m-%Y")
+            
+            repas_list = []
+            for meal in meals:
+                if not meal["categories"]: continue
+                t = meal["type"].lower()
+                if any(x in t for x in ("petit déjeuner", "petit-dejeuner", "matin")):
+                    meal_type = "matin"
+                elif "déjeuner" in t or "midi" in t:
+                    meal_type = "midi"
+                elif "dîner" in t or "soir" in t:
+                    meal_type = "soir"
+                else:
+                    meal_type = meal["type"].strip() or "midi"
+                    
+                repas_list.append({
+                    "type": meal_type,
+                    "categories": meal["categories"]
+                })
+            if repas_list:
+                menus.append({
+                    "date": date_formatted,
+                    "repas": repas_list
+                })
+            
+    menus.sort(key=lambda x: datetime.strptime(x["date"], "%d-%m-%Y"))
+    return menus
+ 
 def fetch_records():
     recs, offset = [], 0
     while True:
@@ -274,7 +491,6 @@ def main():
         matched_crous = None
         best_score = -1
         
-        # Score-based matching to prevent e.g. RU Nation matching Admin Nation
         for crous_norm, crous_data in croustillant_data.items():
             crous_orig = crous_data["original_name"]
             crous_core = core_name(crous_orig)
@@ -298,6 +514,12 @@ def main():
         croustillant_code = matched_crous["code"] if matched_crous else None
         croustillant_slug = matched_crous["slug"] if matched_crous else None # Add this line
 
+        crous_url = get_crous_paris_url(venue_name, clean_address(r))
+        crous_menu = []
+        if crous_url:
+            crous_menu = fetch_crous_paris_menu(crous_url)
+            time.sleep(0.2)
+
         places.append({
             "id": r.get("id"), "name": venue_name, "type": venue_type,
             "zone": r.get("zone"), "address": clean_address(r),
@@ -314,6 +536,7 @@ def main():
             "menus": menus,
             "croustillant_code": croustillant_code,
             "croustillant_slug": croustillant_slug,
+            "crous_menu": crous_menu,
         })
         
     # Deduplicate menus
@@ -344,17 +567,43 @@ def main():
     unp = sum(1 for p in places if p["schedule_confidence"] == "unparsed")
     cond = sum(1 for p in places if p["conditional_days"])
     confirmed = sum(1 for p in places if p["closure_status"] == "confirmed")
-    with_menus = sum(1 for p in places if p.get("menu_refs"))
-    
-    print(f"\nwrote {OUT}: {len(places)} places ({len(places) - unp} parsed, {unp} unparsed, "
-          f"{cond} conditional, {with_menus} with menus, {len(unique_menus)} unique menus)")
+
+    with_croustillant_menus = sum(1 for p in places if p.get("menu_refs"))
+    with_official_menus = sum(1 for p in places if p.get("crous_menu"))
+    with_any_menu = sum(
+        1 for p in places
+        if p.get("menu_refs") or p.get("crous_menu")
+    )
+    no_menu = [
+        p["name"]
+        for p in places
+        if not p.get("menu_refs") and not p.get("crous_menu")
+    ]
+    crous_code_but_no_menu = [
+        p["name"]
+        for p in places
+        if p.get("croustillant_code") and not p.get("menu_refs")
+    ]
+    print(
+        f"\nwrote {OUT}: {len(places)} places "
+        f"({len(places) - unp} parsed, {unp} unparsed, {cond} conditional)"
+    )
+    print(
+        f"menus: {with_any_menu} with any menu, "
+        f"{with_croustillant_menus} with CROUStillant menus, "
+        f"{with_official_menus} with official CROUS Paris menus, "
+        f"{len(unique_menus)} unique CROUStillant menus"
+    )
     print(f"closures: {confirmed} confirmed, {len(stale)} stale flags ignored: {stale}")
 
-    # Diagnostic for unmatched venues
-    unmatched = [p["name"] for p in places if not p.get("croustillant_code")]
-    if unmatched:
-        print(f"\n  Note: {len(unmatched)} venues have no CROUStillant match (likely closed or no daily menu):")
-        for n in unmatched[:15]:
+    if no_menu:
+        print(f"\nWarning: {len(no_menu)} venues have no menu from either source:")
+        for n in no_menu[:50]:
+            print(f"    - {n}")
+
+    if crous_code_but_no_menu:
+        print(f"\nWarning: {len(crous_code_but_no_menu)} venues matched CROUStillant but returned no menu:")
+        for n in crous_code_but_no_menu[:50]:
             print(f"    - {n}")
 
 if __name__ == "__main__":

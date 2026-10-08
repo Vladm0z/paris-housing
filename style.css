@@ -227,5 +227,8 @@ html, body, #map { height: 100%; margin: 0; font-family: system-ui, -apple-syste
 .cat { margin-left: 8px; font-size: 0.95em; line-height: 1.4; }
 .menu-credit { font-size: 0.75em; color: #888; margin-top: 8px; text-align: right; border-top: 1px solid #eee; padding-top: 4px; }
 .menu-range { font-size: 12px; color: #555; font-weight: 600; margin-bottom: 6px; }
-
+.main-tabs { margin-bottom: 10px; border-bottom: 2px solid #1565c0; }
+.main-tabs .menu-tab { font-weight: 600; font-size: 13px; color: #1565c0; }
+.main-tabs .menu-tab.active { color: #0d47a1; border-bottom-color: #0d47a1; }
+.menu-day-content { margin-top: 6px; }
 .blur-notice { font-size: 11px; color: #888; font-style: italic; margin-top: 8px; border-top: 1px solid #eee; padding-top: 4px; }
